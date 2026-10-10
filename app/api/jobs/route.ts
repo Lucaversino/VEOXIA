@@ -1,0 +1,2 @@
+import {NextResponse} from 'next/server';import {requireUser} from '@/lib/supabase';import {handleError,jsonError} from '@/lib/api';
+export async function GET(){try{const {db,user,error}=await requireUser();if(!db||!user)return jsonError(error||'Não autorizado',401);const {data,error:err}=await db.from('generation_jobs').select('id,type,status,error_message,created_at,completed_at,influencer_id').eq('user_id',user.id).order('created_at',{ascending:false}).limit(50);if(err)throw err;return NextResponse.json({items:data})}catch(e){return handleError(e)}}
