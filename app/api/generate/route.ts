@@ -4,6 +4,7 @@ import { requireUser } from '@/lib/supabase-server';
 import { adminDb } from '@/lib/supabase-admin';
 import { BytePlusProvider } from '@/lib/byteplus';
 import { handleError, jsonError, rateGate } from '@/lib/api';
+import {videoTestPermitted} from '@/lib/video-gate';
 
 const Schema = z.object({
   influencerId: z.string().uuid(),
@@ -13,8 +14,7 @@ const Schema = z.object({
   voiceId: z.string().uuid().optional(),
   script: z.string().trim().max(1200).optional(),
   quality: z.enum(['standard', 'upscaled_4k']).default('standard'),
-}).refine(x => x.type !== 'video' || Boolean(x.script && x.voiceId), {
-  message: 'Para vídeo com voz, selecione a voz e escreva a fala.',
+  videoDuration: z.enum(['5','10']).optional(),
 });
 
 const allowed = rateGate(8, 60_000);
@@ -114,7 +114,24 @@ export async function POST(req: Request) {
     if (!influencer) return jsonError('Personagem não encontrado.', 404);
 
     if (input.type === 'video') {
-      return jsonError('Vídeo com voz ainda não está conectado nesta etapa. Vamos ativar primeiro a geração de imagens BytePlus.', 501);
+      if(!videoTestPermitted(user.id))return jsonError('Teste de vídeo BytePlus disponível somente ao administrador autorizado.',403);
+      if(!process.env.BYTEPLUS_API_KEY)return jsonError('BYTEPLUS_API_KEY não configurada.',503);
+      const admin=adminDb();
+      const {count,error:countError}=await admin.from('generation_jobs').select('id',{count:'exact',head:true}).eq('user_id',user.id).eq('type','video').in('status',['queued','processing']);
+      if(countError)throw countError;
+      if((count||0)>0)return jsonError('Você já tem um vídeo em processamento. Aguarde a conclusão antes de iniciar outro.',409);
+      const duration=Number(input.videoDuration||'5');
+      const {data:videoJob,error:videoError}=await admin.from('generation_jobs').insert({user_id:user.id,influencer_id:input.influencerId,type:'video',status:'queued',payload:{prompt:input.prompt,ratio:input.ratio,videoDuration:duration,provider:'byteplus',model:'seedance-1-5-pro-251215'}}).select('id').single();
+      if(videoError||!videoJob)throw videoError||new Error('Job de vídeo não criado');
+      try{
+        const remote=await new BytePlusProvider().createVideo({model:'seedance-1-5-pro-251215',prompt:input.prompt,duration,resolution:'720p',ratio:input.ratio,generateAudio:false});
+        const {error:saveError}=await admin.from('generation_jobs').update({status:'processing',payload:{prompt:input.prompt,ratio:input.ratio,videoDuration:duration,provider:'byteplus',model:'seedance-1-5-pro-251215',external_task_id:remote.id}}).eq('id',videoJob.id);
+        if(saveError)throw saveError;
+        return NextResponse.json({jobId:videoJob.id,status:'processing',message:'Tarefa Seedance criada. Acompanhe em Histórico. Geração paga pela BytePlus.'},{status:202});
+      }catch(videoFailure){
+        await admin.from('generation_jobs').update({status:'failed',error_message:'Falha ao solicitar vídeo; confira tarefas na BytePlus antes de tentar novamente.',completed_at:new Date().toISOString()}).eq('id',videoJob.id);
+        throw videoFailure;
+      }
     }
 
     const { data: job, error: jobError } = await db
