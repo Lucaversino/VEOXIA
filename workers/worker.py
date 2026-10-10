@@ -2,7 +2,7 @@
 Run in a trusted GPU environment only. NEVER expose Supabase service role to the web client.
 A workflow exported using ComfyUI > Save (API format) is required.
 """
-import os,json,time,copy,logging,requests
+import os,json,time,copy,logging,requests,secrets
 from pathlib import Path
 logging.basicConfig(level=logging.INFO,format='%(asctime)s %(levelname)s %(message)s')
 S=os.environ['SUPABASE_URL'].rstrip('/')
@@ -24,12 +24,25 @@ def process(job):
     wf=Path(os.environ.get('COMFYUI_WORKFLOW_FILE','workflow_api.json'))
     if not wf.exists():raise RuntimeError(f'Workflow ComfyUI não encontrado: {wf}')
     workflow=json.loads(wf.read_text(encoding='utf-8'))
+    checkpoint=os.environ.get('COMFYUI_CHECKPOINT','')
+    if checkpoint:
+        for node_data in workflow.values():
+            if node_data.get('class_type')=='CheckpointLoaderSimple':
+                node_data['inputs']['ckpt_name']=checkpoint
     node=os.environ.get('COMFYUI_PROMPT_NODE_ID','6')
     if node not in workflow or 'text' not in workflow[node]['inputs']:
         raise RuntimeError('COMFYUI_PROMPT_NODE_ID não aponta para um nó CLIPTextEncode válido.')
     prompt=payload.get('prompt','')
     if not isinstance(prompt,str) or len(prompt)<10 or len(prompt)>1800:raise RuntimeError('Prompt inválido')
     workflow[node]['inputs']['text']=prompt
+    for nd in workflow.values():
+        if nd.get('class_type')=='KSampler':nd['inputs']['seed']=secrets.randbelow(2**53)
+    ratio=payload.get('ratio','9:16')
+    sizes={'9:16':(576,1024),'1:1':(768,768),'16:9':(1024,576)}
+    if ratio not in sizes:raise RuntimeError('Proporção inválida')
+    for nd in workflow.values():
+        if nd.get('class_type')=='EmptyLatentImage':
+            nd['inputs']['width'],nd['inputs']['height']=sizes[ratio]
     resp=requests.post(C+'/prompt',json={'prompt':workflow},timeout=25);resp.raise_for_status()
     prompt_id=resp.json()['prompt_id']
     history=None
@@ -54,15 +67,18 @@ def process(job):
     upload.raise_for_status()
     call('POST','assets',json={'user_id':job['user_id'],'influencer_id':job['influencer_id'],'job_id':job['id'],'kind':'image','storage_path':path},headers={'Prefer':'return=minimal'})
 
+def rpc_claim():
+    r=s.post(S+'/rest/v1/rpc/claim_next_generation_job',json={},timeout=25)
+    r.raise_for_status()
+    return r.json()
+
 def main():
     logging.info('GPU image worker started (single-worker).')
     while True:
         try:
-            jobs=call('GET','generation_jobs?status=eq.queued&order=created_at.asc&limit=1&select=*')
+            jobs=rpc_claim()
             if jobs:
                 job=jobs[0]
-                # Single worker deployment only. Multi-worker deployment requires atomic queue claim.
-                status(job['id'],'processing')
                 try:
                     process(job)
                     status(job['id'],'completed')

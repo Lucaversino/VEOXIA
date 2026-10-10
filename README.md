@@ -60,3 +60,7 @@ Projeto Next.js + Supabase + Fish Audio com interface inspirada visualmente na r
 - https://docs.comfy.org/development/comfyui-server/comms_routes
 
 Nenhuma chave real é distribuída neste projeto.
+
+
+## v1.4: RunPod + ComfyUI
+Consulte `workers/RUNPOD_SETUP.md`. Execute a migração `supabase/migrations/002_worker_claim.sql` e mantenha `GPU_QUEUE_ENABLED=false` até ligar o Pod. O projeto contém o ComfyUI fornecido pelo usuário em `workers/ComfyUI-master.zip`, mas **não contém checkpoints SDXL nem GPU provisionada**. Esta versão não produz vídeo nem faz LoRA.
