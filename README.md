@@ -108,3 +108,11 @@ Nenhuma chave real é distribuída neste projeto.
 
 ## v1.4: RunPod + ComfyUI
 Consulte `workers/RUNPOD_SETUP.md`. Execute a migração `supabase/migrations/002_worker_claim.sql` e mantenha `GPU_QUEUE_ENABLED=false` até ligar o Pod. O projeto contém o ComfyUI fornecido pelo usuário em `workers/ComfyUI-master.zip`, mas **não contém checkpoints SDXL nem GPU provisionada**. Esta versão não produz vídeo nem faz LoRA.
+
+
+## V2.1: BytePlus image generation connected
+- `app/api/generate/route.ts` now supports **direct image generation via BytePlus** when `BYTEPLUS_GENERATION_ENABLED=true`.
+- The route creates a job, calls BytePlus on the server, downloads the generated image, uploads it to the private `creations` bucket and inserts an `assets` row.
+- `SUPABASE_SERVICE_ROLE_KEY` is now required server-side for this direct save flow.
+- If `BYTEPLUS_GENERATION_ENABLED=false`, the route still falls back to the legacy GPU queue (`GPU_QUEUE_ENABLED=true`).
+- Video generation remains disabled in this step.
