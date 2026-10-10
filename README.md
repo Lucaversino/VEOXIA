@@ -116,3 +116,13 @@ Consulte `workers/RUNPOD_SETUP.md`. Execute a migração `supabase/migrations/00
 - `SUPABASE_SERVICE_ROLE_KEY` is now required server-side for this direct save flow.
 - If `BYTEPLUS_GENERATION_ENABLED=false`, the route still falls back to the legacy GPU queue (`GPU_QUEUE_ENABLED=true`).
 - Video generation remains disabled in this step.
+
+
+## Ajustes do login (v2.2)
+- Modal de autenticação com Google ou e-mail/senha.
+- Recuperação de senha no endereço `/auth/reset`.
+- Tratamento de falhas no callback OAuth.
+- **Importante:** o erro 401 `invalid_client` é retornado pelo Google antes de concluir o fluxo. Esta versão mantém o OAuth, mas não altera nem pode validar o Client ID configurado no serviço remoto.
+- Ative Email em Supabase > Authentication > Sign In / Providers e adicione `https://veoxia.vercel.app/auth/reset` em Authentication > URL Configuration > Redirect URLs.
+- A conta já existente precisa definir senha pelo link de recuperação se tiver sido cadastrada sem senha.
+- Este pacote não atribui privilégios de administrador. Isso exige controle de permissões no servidor/banco.
