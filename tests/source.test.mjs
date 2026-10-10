@@ -4,3 +4,10 @@ test('arquivos necessários presentes',()=>['app/page.tsx','app/layout.tsx','mid
 test('fish token somente no backend',()=>{assert.ok(!r('app/page.tsx').includes('FISH_AUDIO_API_KEY'));assert.ok(r('app/api/voice/route.ts').includes('process.env.FISH_AUDIO_API_KEY'))});
 test('RLS habilitada nas tabelas de identidade',()=>{const sql=r('supabase/migrations/001_init.sql');assert.match(sql,/alter table public.influencers enable row level security/);assert.match(sql,/alter table public.generation_jobs enable row level security/) });
 test('nenhuma promessa de 4K nativo',()=>assert.match(r('app/page.tsx'),/não resolução nativa garantida/));
+
+
+test('cookie setAll recebe tipagem explícita no servidor', () => {
+  const source = r('lib/supabase-server.ts');
+  assert.match(source, /type CookieOptions/);
+  assert.match(source, /setAll\(values: \{ name: string; value: string; options\?: CookieOptions \}\[\]\)/);
+});
