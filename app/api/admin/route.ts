@@ -25,7 +25,7 @@ export async function GET(){
   db.from('generation_jobs').select('id,user_id,type,status,payload,created_at,completed_at').order('created_at',{ascending:false}).limit(300)
  ]);
  for(const r of [wallets,ledger,jobs])if(r.error)throw r.error;
- return NextResponse.json({users:users.users.map(u=>({id:u.id,email:u.email,created_at:u.created_at,last_sign_in_at:u.last_sign_in_at,balance:wallets.data?.find(w=>w.user_id===u.id)?.balance||0})),transactions:ledger.data,jobs:jobs.data,usageNotice:'Tokens e custos da BytePlus só aparecem se coletados e persistidos por integração; histórico antigo não registra essas métricas.',hasMoreUsers:users.users.length===1000},{headers:{'Cache-Control':'no-store'}});
+ return NextResponse.json({users:users.users.map(u=>({id:u.id,email:u.email,created_at:u.created_at,last_sign_in_at:u.last_sign_in_at,balance:wallets.data?.find(w=>w.user_id===u.id)?.balance||0})),transactions:ledger.data,jobs:jobs.data,usageNotice:'Custos são estimativas calculadas na reserva, não uma leitura da fatura BytePlus. O histórico antigo não possui estes valores.',hasMoreUsers:users.users.length===1000},{headers:{'Cache-Control':'no-store'}});
  }catch(e){const detail=explainAdminError(e);console.error('[VEOX ADMIN GET]',detail);return NextResponse.json({error:detail},{status:500,headers:{'Cache-Control':'no-store'}});}
 }
 export async function POST(req:Request){

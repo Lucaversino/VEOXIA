@@ -1,7 +1,4 @@
 import {NextResponse} from 'next/server';
-import {requireUser} from '@/lib/supabase-server';
-export const runtime='nodejs';
-export async function GET(){
- const {user}=await requireUser();if(!user)return NextResponse.json({error:'Não autorizado'},{status:401});
- return NextResponse.json({provider:'byteplus',configured:Boolean(process.env.BYTEPLUS_API_KEY),enabled:process.env.BYTEPLUS_GENERATION_ENABLED==='true',note:'Integração real bloqueada até configuração de precificação, orçamento, pagamentos e worker. Nenhuma chamada paga é feita aqui.'});
-}
+import {requireAdmin} from '@/lib/admin-access';
+import {getQuote} from '@/lib/billing';
+export async function GET(){if(!(await requireAdmin()).isAdmin)return NextResponse.json({error:'Acesso negado.'},{status:403});let pricingReady=false;try{await getQuote();pricingReady=true}catch{}return NextResponse.json({configured:Boolean(process.env.BYTEPLUS_API_KEY||process.env.BYTEPLUS_MODELARK_API_KEY),enabled:process.env.BYTEPLUS_GENERATION_ENABLED==='true',pricingReady,videoEnabled:false},{headers:{'Cache-Control':'no-store'}})}

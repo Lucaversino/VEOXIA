@@ -22,17 +22,18 @@ export const videoRequestSchema=z.object({
 });
 export type VideoInput=z.infer<typeof videoRequestSchema>;
 export const IMAGE_MODEL='seedream-5-0-lite-260128';
-export const imageRequestSchema=z.object({prompt:z.string().trim().min(10).max(1800),size:z.enum(['2K','4K']).default('2K'),referenceImage:z.string().url().optional()});
-function apiKey(){const key=process.env.BYTEPLUS_API_KEY;if(!key)throw Error('BYTEPLUS_API_KEY ausente no servidor');return key}
+export const imageRequestSchema=z.object({prompt:z.string().trim().min(10).max(3600),size:z.enum(['2K','1440x2560','2560x1440','2048x2048']).default('2K'),referenceImage:z.string().url().optional()});
+function apiKey(){const key=process.env.BYTEPLUS_API_KEY || process.env.BYTEPLUS_MODELARK_API_KEY;if(!key)throw Error('BYTEPLUS_API_KEY ausente no servidor');return key}
 async function request<T>(path:string,method:'POST'|'GET', body?:unknown):Promise<T>{
- const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),20000);
+ const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),90000);
  try{
   const res=await fetch(base+path,{method,headers:{Authorization:`Bearer ${apiKey()}`,...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{}),cache:'no-store',signal:controller.signal});
   const raw=await res.text();let parsed:unknown;try{parsed=JSON.parse(raw)}catch{throw Error(`BytePlus respondeu fora de JSON (HTTP ${res.status})`)}
-  if(!res.ok){const detail=parsed as {error?:{message?:string};message?:string};throw Error(`BytePlus HTTP ${res.status}: ${detail.error?.message||detail.message||'Solicitação recusada'}`)}
+  if(!res.ok){const detail=parsed as {error?:{message?:string};message?:string};throw new ProviderError(res.status, detail.error?.message||detail.message||'Solicitação recusada')}
   return parsed as T;
  }finally{clearTimeout(timer)}
 }
+export class ProviderError extends Error { constructor(public status:number,message:string){super(message)} }
 export class BytePlusProvider {
  // WARNING: These methods incur real provider charges. Never call directly from an unpriced route.
  async createVideo(value:VideoInput):Promise<{id:string}>{
@@ -47,6 +48,6 @@ export class BytePlusProvider {
  }
  async createImage(value:z.infer<typeof imageRequestSchema>):Promise<{data:Array<{url?:string;b64_json?:string}>;usage?:unknown}>{
   const i=imageRequestSchema.parse(value);
-  return request('/images/generations','POST',{model:IMAGE_MODEL,prompt:i.prompt,size:i.size,output_format:'png',watermark:false,...(i.referenceImage?{image:i.referenceImage}:{})});
+  return request('/images/generations','POST',{model:IMAGE_MODEL,prompt:i.prompt,size:i.size,response_format:'b64_json',sequential_image_generation:'disabled',watermark:true,...(i.referenceImage?{image:i.referenceImage}:{})});
  }
 }
