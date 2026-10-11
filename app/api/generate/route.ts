@@ -4,7 +4,7 @@ import { requireUser } from '@/lib/supabase-server';
 import { adminDb } from '@/lib/supabase-admin';
 import { BytePlusProvider } from '@/lib/byteplus';
 import { handleError, jsonError, rateGate } from '@/lib/api';
-import {videoTestPermitted} from '@/lib/video-gate';
+import {ADMIN_EMAIL} from '@/lib/admin-access';
 
 const Schema = z.object({
   influencerId: z.string().uuid(),
@@ -114,26 +114,23 @@ export async function POST(req: Request) {
     if (!influencer) return jsonError('Personagem não encontrado.', 404);
 
     if (input.type === 'video') {
-      if(!videoTestPermitted(user.id))return jsonError('Teste de vídeo BytePlus disponível somente ao administrador autorizado.',403);
-      if(!process.env.BYTEPLUS_API_KEY)return jsonError('BYTEPLUS_API_KEY não configurada.',503);
-      const admin=adminDb();
-      const {count,error:countError}=await admin.from('generation_jobs').select('id',{count:'exact',head:true}).eq('user_id',user.id).eq('type','video').in('status',['queued','processing']);
-      if(countError)throw countError;
-      if((count||0)>0)return jsonError('Você já tem um vídeo em processamento. Aguarde a conclusão antes de iniciar outro.',409);
-      const duration=Number(input.videoDuration||'5');
-      const {data:videoJob,error:videoError}=await admin.from('generation_jobs').insert({user_id:user.id,influencer_id:input.influencerId,type:'video',status:'queued',payload:{prompt:input.prompt,ratio:input.ratio,videoDuration:duration,provider:'byteplus',model:'seedance-1-5-pro-251215'}}).select('id').single();
-      if(videoError||!videoJob)throw videoError||new Error('Job de vídeo não criado');
-      try{
-        const remote=await new BytePlusProvider().createVideo({model:'seedance-1-5-pro-251215',prompt:input.prompt,duration,resolution:'720p',ratio:input.ratio,generateAudio:false});
-        const {error:saveError}=await admin.from('generation_jobs').update({status:'processing',payload:{prompt:input.prompt,ratio:input.ratio,videoDuration:duration,provider:'byteplus',model:'seedance-1-5-pro-251215',external_task_id:remote.id}}).eq('id',videoJob.id);
-        if(saveError)throw saveError;
-        return NextResponse.json({jobId:videoJob.id,status:'processing',message:'Tarefa Seedance criada. Acompanhe em Histórico. Geração paga pela BytePlus.'},{status:202});
-      }catch(videoFailure){
-        await admin.from('generation_jobs').update({status:'failed',error_message:'Falha ao solicitar vídeo; confira tarefas na BytePlus antes de tentar novamente.',completed_at:new Date().toISOString()}).eq('id',videoJob.id);
-        throw videoFailure;
-      }
+      return jsonError('Seedance temporariamente desativado para evitar cobranças.', 503);
+
     }
 
+    // Only paid BytePlus runs reserve credits; test admin is still charged internal credits.
+    const byteplusEnabled = process.env.BYTEPLUS_GENERATION_ENABLED === 'true';
+    const isOwner = user.email?.toLowerCase() === ADMIN_EMAIL && !!user.email_confirmed_at && (!process.env.ADMIN_USER_ID || user.id===process.env.ADMIN_USER_ID);
+    const price = Number(process.env.VEOX_IMAGE_CREDIT_PRICE || '1');
+    if (byteplusEnabled && (!Number.isSafeInteger(price) || price < 1 || price > 100000)) return jsonError('Preço em créditos inválido no servidor.',503);
+    const adminCreditDb = byteplusEnabled ? adminDb() : null;
+    const reservationId = crypto.randomUUID();
+    if (byteplusEnabled && !isOwner && process.env.VEOX_PUBLIC_GENERATION_ENABLED !== 'true') return jsonError('Geração pública ainda não liberada pelo administrador.',403);
+    if (byteplusEnabled && adminCreditDb) {
+      const {error:creditError} = await adminCreditDb.rpc('veox_credit_change',{p_user:user.id,p_delta:-price,p_reason:'Reserva de geração de imagem',p_external:'generate:'+reservationId});
+      if(creditError)return jsonError('Créditos insuficientes ou carteira não configurada: '+creditError.message,402);
+    }
+    try {
     const { data: job, error: jobError } = await db
       .from('generation_jobs')
       .insert({
@@ -150,7 +147,7 @@ export async function POST(req: Request) {
       .single();
     if (jobError || !job) throw jobError || new Error('Job não foi criado');
 
-    if (process.env.BYTEPLUS_GENERATION_ENABLED === 'true') {
+    if (byteplusEnabled) {
       await completeBytePlusImageJob(job.id, user.id, input.influencerId, input.prompt, input.quality);
       return NextResponse.json({
         jobId: job.id,
@@ -180,6 +177,13 @@ export async function POST(req: Request) {
     }).eq('id', job.id);
 
     return jsonError('Nenhum provedor de imagem ativo. Ative BYTEPLUS_GENERATION_ENABLED=true para usar a BytePlus.', 503);
+    }catch(generationFailure){
+      if (byteplusEnabled && adminCreditDb) {
+        const {error:refundError}=await adminCreditDb.rpc('veox_credit_change',{p_user:user.id,p_delta:price,p_reason:'Estorno da geração com falha',p_external:'refund:'+reservationId});
+        if(refundError) console.error('Credit refund failed, requires administrator reconciliation',reservationId,refundError.message);
+      }
+      throw generationFailure;
+    }
   } catch (e) {
     return handleError(e);
   }
