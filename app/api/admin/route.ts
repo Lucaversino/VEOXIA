@@ -2,6 +2,18 @@ import {NextResponse} from 'next/server';
 import {z} from 'zod';
 import {requireAdmin} from '@/lib/admin-access';
 import {adminDb} from '@/lib/supabase-admin';
+
+// Supabase/PostgREST errors are plain objects, not necessarily Error instances.
+function explainAdminError(e:unknown):string {
+ if(e instanceof Error)return e.message;
+ if(e && typeof e==='object'){
+  const v=e as Record<string,unknown>;
+  const parts=[v.code,v.message,v.details,v.hint].filter(x=>typeof x==='string' && x.trim());
+  if(parts.length)return parts.join(' | ').slice(0,900);
+ }
+ return 'Falha não identificada. Consulte os Runtime Logs da Vercel.';
+}
+
 const inputSchema=z.object({userId:z.string().uuid(),amount:z.number().int().min(-1000000).max(1000000).refine(x=>x!==0),reason:z.string().trim().min(5).max(150),operationId:z.string().uuid()});
 export async function GET(){
  const s=await requireAdmin();if(!s.isAdmin)return NextResponse.json({error:'Acesso negado'},{status:403});
@@ -14,7 +26,7 @@ export async function GET(){
  ]);
  for(const r of [wallets,ledger,jobs])if(r.error)throw r.error;
  return NextResponse.json({users:users.users.map(u=>({id:u.id,email:u.email,created_at:u.created_at,last_sign_in_at:u.last_sign_in_at,balance:wallets.data?.find(w=>w.user_id===u.id)?.balance||0})),transactions:ledger.data,jobs:jobs.data,usageNotice:'Tokens e custos da BytePlus só aparecem se coletados e persistidos por integração; histórico antigo não registra essas métricas.',hasMoreUsers:users.users.length===1000},{headers:{'Cache-Control':'no-store'}});
- }catch(e){return NextResponse.json({error:e instanceof Error?e.message:'Erro administrativo'},{status:500});}
+ }catch(e){const detail=explainAdminError(e);console.error('[VEOX ADMIN GET]',detail);return NextResponse.json({error:detail},{status:500,headers:{'Cache-Control':'no-store'}});}
 }
 export async function POST(req:Request){
  const s=await requireAdmin();if(!s.isAdmin)return NextResponse.json({error:'Acesso negado'},{status:403});
@@ -26,5 +38,5 @@ export async function POST(req:Request){
  if(error)throw error;
  await db.from('audit_logs').insert({user_id:s.user!.id,action:'admin_credit_adjustment',metadata:{target_user_id:input.userId,delta:input.amount,reason:input.reason,operation_id:input.operationId}});
  return NextResponse.json({balance},{headers:{'Cache-Control':'no-store'}});
- }catch(e){return NextResponse.json({error:e instanceof Error?e.message:'Falha na operação'},{status:400});}
+ }catch(e){const detail=explainAdminError(e);console.error('[VEOX ADMIN POST]',detail);return NextResponse.json({error:detail},{status:400,headers:{'Cache-Control':'no-store'}});}
 }
